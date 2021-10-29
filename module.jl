@@ -2,6 +2,7 @@ module LatticeMethod
 
 using QHull
 using StatsBase
+using MiniQhull
 
 struct Lattice
     # the raw pre_synaptic and post_synaptic co-ordinate locations
@@ -36,16 +37,16 @@ struct Lattice
         reverse_preimage_points = select_projection_points(post_synaptic, params.lattice_reverse_preimage...)
 
         # create the images 
-        forward_image_points = create_projection(forward_preimage_points, pre_synaptic, post_synaptic, params.lattice_forward_image...)
-        reverse_image_points = create_projection(reverse_preimage_points, post_synaptic, pre_synaptic, params.lattice_reverse_image...)
+        forward_image_points = create_projection(forward_preimage_points, adjacency, pre_synaptic, post_synaptic, params.lattice_forward_image...)
+        reverse_image_points = create_projection(reverse_preimage_points, transpose(adjacency), post_synaptic, pre_synaptic, params.lattice_reverse_image...)
 
         # create the functional map on the indexes
         forward_projection = vcat(forward_preimage_points, forward_image_points)
         reverse_projection = vcat(reverse_preimage_points, reverse_image_points)
 
         # create the triangulations; graph adjacencies indexed on 1:length(projection)
-        forward_triangulation_abstract = triangulate(pre_synaptic[forward_preimage_points,:], params_lattice.forward_triangle_tolerance)
-        reverse_triangulation_abstract = triangulate(post_synaptic[reverse_preimage_points,:], params_lattice.reverse_triangle_tolerance)
+        forward_triangulation_abstract = delaunay(pre_synaptic[forward_preimage_points,:]')
+        reverse_triangulation_abstract = delaunay(post_synaptic[reverse_preimage_points,:]')
 
         # remove any overlapping links when the functional map is applied to the graph, the links remaining define the lattice object
         forward_links_retained, forward_links_removed = link_crossings(post_synaptic, forward_triangulation_abstract, forward_projection)
@@ -58,7 +59,8 @@ function select_projection_points(coordinates, intial_points, spacing_upper_boun
     mean_spacing = 0;
     n_points = intial_points
     points_selected = []
-    # While the spacing is not in bounds we target a minimum spacing and then randomly select n_points which are good candidates for the desired target spacing. We could allow some number of trials to get to the desired number
+    # While the spacing is not in bounds we target a minimum spacing and then randomly select n_points which are good candidates for the desired target spacing. 
+    # When we select the points we want to ensure that there are a number of points around it within a given radius so that the projection has a good quality. This step is ommitted in this version.
 
     while (mean_spacing < spacing_lower_bound) || (mean_spacing > spacing_upper_bound)        
         # set the spacing
@@ -72,7 +74,7 @@ function select_projection_points(coordinates, intial_points, spacing_upper_boun
             while (length(points_selected) < n_points) && (length(potential_points)>0)
                 # chose a candidate point, add it to the selected points list and remove it from potential further selections
                 candidate = rand(1:length(potential_points))
-                selected_index = potential_points[candidate_point_index]
+                selected_index = potential_points[candidate]
                 append!(points_selected, selected_index)
                 deleteat!(potential_points, candidate)
 
@@ -94,9 +96,21 @@ function select_projection_points(coordinates, intial_points, spacing_upper_boun
     return points_selected
 end
 
-function create_projection(preimage_points, preimage_coordinates, image_coordinates, radius)
-    
-    return indexes 
+function create_projection(preimage_points, adjacency, preimage_coordinates, image_coordinates, radius)
+    projected_image = zeros(length(preimage_points), 2)
+    # be careful with your adjacency matrix in this function - it might need to be transposed
+    for i in preimage_points
+        pre_image_projected_radius = findall(x -> sqrt((preimage_coordinates[x, 1] - preimage_coordinates[i, 1])^2 + (preimage_coordinates[x, 2] - preimage_coordinates[i, 2])^2) < radius, 1:size(preimage_coordinates)[1])
+        image_projected_points = adjacency[pre_image_projected_radius, :]
+        projected_image[i, 1] = mean(image_coordinates[image_projected_points, 1])
+        projected_image[i, 2] = mean(image_coordinates[image_projected_points, 1])
+    end
+    return projected_image 
+end
+
+function triangulate(coordinates)
+
+    return adjacency
 end
 
 function topograph_linking(pre_synaptic, post_synaptic, params_linking)
