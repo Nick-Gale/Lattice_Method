@@ -1,5 +1,8 @@
 module LatticeMethod
 
+using QHull
+using StatsBase
+
 struct Lattice
     # the raw pre_synaptic and post_synaptic co-ordinate locations
     pre_synaptic::Array{Float64, 2}
@@ -50,13 +53,49 @@ struct Lattice
     end
 end
 
-function select_projection_points(coordinates, intial_points, spacing, spacing_multiplier, spacing_upper_bound, spacing_lower_bound)
+function select_projection_points(coordinates, intial_points, spacing_upper_bound, spacing_lower_bound, minimum_spacing_fraction, spacing_reduction_factor)
+    area = chull(coordinates)
+    mean_spacing = 0;
+    n_points = intial_points
+    points_selected = []
+    # While the spacing is not in bounds we target a minimum spacing and then randomly select n_points which are good candidates for the desired target spacing. We could allow some number of trials to get to the desired number
 
-    return indexes
+    while (mean_spacing < spacing_lower_bound) || (mean_spacing > spacing_upper_bound)        
+        # set the spacing
+        min_spacing = minimum_spacing_fraction * sqrt(area / n_points)
+        while length(points_selected) < n_points
+            # if a good trial set was not found reset the selected points and potential points and try again after reducing the spacing
+            potential_points = collect(1:size(coordinates)[1])
+            points_selected = []
+
+            # if the required number of points have not yet been chosen and there are still some points to be chosen from then choose a new point
+            while (length(points_selected) < n_points) && (length(potential_points)>0)
+                # chose a candidate point, add it to the selected points list and remove it from potential further selections
+                candidate = rand(1:length(potential_points))
+                selected_index = potential_points[candidate_point_index]
+                append!(points_selected, selected_index)
+                deleteat!(potential_points, candidate)
+
+                # now remove all potential points within the mininum spacing of this chosen point and remove them
+                unacceptable_indexes = findall(x -> sqrt((coordinates[x, 1] - coordinates[selected_index, 1])^2 + (coordinates[x, 2] - coordinates[selected_index, 2])^2) < min_spacing, 1:length(coordinates))
+                potential_points = setdiff(potential_points, unacceptable_indexes)
+            end
+
+            # reduce the spacing
+            min_spacing *= spacing_reduction_factor
+        end
+
+        #compute the spacings to check if within bounds and reduce the number of points if necessary to continue the loop
+        distances = sqrt.((coordinates[points_selected, 1] .- coordinates[points_selected, 1]') .^ 2 .+ (coordinates[points_selected, 2] .- coordinates[points_selected, 2]') .^ 2)
+        mean_spacing = mean(distances .+ maximum(distances))
+        n_points -= 1
+    end
+
+    return points_selected
 end
 
 function create_projection(preimage_points, preimage_coordinates, image_coordinates, radius)
-
+    
     return indexes 
 end
 
