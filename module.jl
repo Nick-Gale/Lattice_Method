@@ -6,12 +6,14 @@ using MiniQhull
 using Plots
 using Random
 using GeometryTypes
+using ProgressMeter
 
 
 export test_lattice
 export topograph_linking
 export TopographicLattice
 export exist_line_intersection
+export lattice_plot
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
 # Type Definitions
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -42,19 +44,19 @@ struct TopographicLattice
         # construct the topographic map by some linking function 
         pre_synaptic = hcat(pre_x, pre_y)
         post_synaptic = hcat(post_x, post_y)
-        topographic_map = topographic_linking(pre_synaptic, post_synaptic, params_linking)
-        
+        topographic_map, pre_synaptic, post_synaptic = topographic_linking(pre_synaptic, post_synaptic, params_linking)
 
         # define the projections pre_image on a restricted number of points
-        forward_preimage_points = select_projection_points(pre_synaptic; params_lattice["lattice_forward_preimage"]...)
-        reverse_preimage_points = select_projection_points(post_synaptic; params_lattice["lattice_reverse_preimage"]...)
+        println("Selecting Points")
+        @time forward_preimage_points = select_projection_points(pre_synaptic; params_lattice["lattice_forward_preimage"]...)
+        @time reverse_preimage_points = select_projection_points(post_synaptic; params_lattice["lattice_reverse_preimage"]...)
         forward_preimage = pre_synaptic[forward_preimage_points, :]
-        reverse_preimage = pre_synaptic[reverse_preimage_points, :]
-
+        reverse_preimage = post_synaptic[reverse_preimage_points, :]
+        
+        println("Creating Images")
         # create the images 
-        forward_image = create_projection(forward_preimage_points, topographic_map, pre_synaptic, post_synaptic; params_lattice["lattice_forward_image"]...)
-        reverse_image = create_projection(reverse_preimage_points, transpose(topographic_map), post_synaptic, pre_synaptic; params_lattice["lattice_reverse_image"]...)
-
+        @time forward_image = create_projection(forward_preimage_points, transpose(topographic_map), pre_synaptic, post_synaptic; params_lattice["lattice_forward_image"]...)
+        @time reverse_image = create_projection(reverse_preimage_points, topographic_map, post_synaptic, pre_synaptic; params_lattice["lattice_reverse_image"]...)
 
         # create the graph adjacencies based on a delaunay triangulation; graph adjacencies indexed on 1:length(projection)
         forward_adjacency_sparse, forward_triangulation  = adj_mat(forward_preimage)
@@ -119,7 +121,7 @@ end
 function create_projection(preimage_points, adjacency, preimage_coordinates, image_coordinates; radius=0.05)
     projected_image = zeros(length(preimage_points), 2)
     # be careful with your adjacency matrix in this function - it might need to be transposed
-    for i = 1:length(preimage_points)
+    @showprogress for i = 1:length(preimage_points)
         pre_image_projected_radius = findall(x -> sqrt((preimage_coordinates[x, 1] - preimage_coordinates[preimage_points[i], 1])^2 + (preimage_coordinates[x, 2] - preimage_coordinates[preimage_points[i], 2])^2) < radius, 1:size(preimage_coordinates)[1])
         image_projected_points = []
         for j in pre_image_projected_radius
@@ -295,10 +297,10 @@ function lattice_plot(lattice::TopographicLattice; print_removed_links=true)
         end
     end
 
-    plot!(forward_preimage_plot, forward_preimage[:, 1], forward_preimage[:, 2], seriestype=:scatter, color=:blue)
-    plot!(reverse_preimage_plot, reverse_preimage[:, 1], reverse_preimage[:, 2], seriestype=:scatter, color=:black)
-    plot!(reverse_image_plot, reverse_image[:, 1], reverse_image[:, 2], seriestype=:scatter, color=:black)
-    plot!(forward_image_plot, forward_image[:, 1], forward_image[:, 2], seriestype=:scatter, color=:blue)
+    plot!(forward_preimage_plot, forward_preimage[:, 1], forward_preimage[:, 2], xlim=(0,1), ylim=(0,1), seriestype=:scatter, color=:blue)
+    plot!(reverse_preimage_plot, reverse_preimage[:, 1], reverse_preimage[:, 2], xlim=(0,1), ylim=(0,1), seriestype=:scatter, color=:black)
+    plot!(reverse_image_plot, reverse_image[:, 1], reverse_image[:, 2], xlim=(0,1), ylim=(0,1), seriestype=:scatter, color=:black)
+    plot!(forward_image_plot, forward_image[:, 1], forward_image[:, 2], xlim=(0,1), ylim=(0,1), seriestype=:scatter, color=:blue)
 
     return forward_preimage_plot, forward_image_plot, reverse_preimage_plot, reverse_image_plot
 end
@@ -336,6 +338,28 @@ function topographic_linking(pre_synaptic, post_synaptic, params_linking)
     if linking_key == "asscociation"
         return topographic_asscociation(pre_synaptic, post_synaptic; params_linking["params"]...)
     end
+end
+
+function topographic_phase_linking(pre_synaptic, post_synaptic; phase_parameter=0.0)
+    pre_list = [[]]
+    for i = 1:size(pre_synaptic)[1]
+        push!(pre_list, pre_synaptic[i, :])
+    end
+    deleteat!(pre_list, 1)
+    pre_list = unique(pre_list)
+    array = zeros(Int64, size(post_synaptic)[1], length(pre_list))
+    for j = 1:size(array)[2]
+        connected_inds = getindex.(findall(x -> all(pre_synaptic[x, :] .== pre_list[j]), 1:size(pre_synaptic)[1]), 1)
+        for i in connected_inds
+            array[i, j] += 1
+        end
+    end
+    new_presynaptic = zeros(Float64, length(pre_list), 2)
+    for i = 1:length(pre_list)
+        new_presynaptic[i, 1] = pre_list[i][1]
+        new_presynaptic[i, 2] = pre_list[i][2]
+    end
+    return array, new_presynaptic, post_synaptic
 end
 
 function topographic_asscociation(pre_synaptic, post_synaptic; radius=0.0001)
